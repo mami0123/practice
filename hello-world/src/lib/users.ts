@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { supabase } from "./supabase";
 
 interface User {
   id: string;
@@ -7,9 +8,6 @@ interface User {
   name: string;
   createdAt: Date;
 }
-
-// インメモリユーザーデータストア
-const users: Map<string, User> = new Map();
 
 export async function createUser(
   email: string,
@@ -22,39 +20,58 @@ export async function createUser(
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  const id = crypto.randomUUID();
 
-  const user: User = {
-    id,
-    email,
-    password: hashedPassword,
-    name,
-    createdAt: new Date(),
+  const { data, error } = await supabase
+    .from("users")
+    .insert({ email, password: hashedPassword, user_name: name })
+    .select("id, email, user_name, created_at")
+    .single();
+
+  if (error || !data) {
+    throw new Error("ユーザー作成に失敗しました: " + error?.message);
+  }
+
+  return {
+    id: String(data.id),
+    email: data.email,
+    name: data.user_name,
+    createdAt: new Date(data.created_at),
   };
-
-  users.set(id, user);
-
-  const { password: _, ...userWithoutPassword } = user;
-  return userWithoutPassword;
 }
 
 export async function getUserByEmail(email: string): Promise<User | null> {
-  for (const user of users.values()) {
-    if (user.email === email) {
-      return user;
-    }
-  }
-  return null;
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, email, password, user_name, created_at")
+    .eq("email", email)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return {
+    id: String(data.id),
+    email: data.email,
+    password: data.password,
+    name: data.user_name,
+    createdAt: new Date(data.created_at),
+  };
 }
 
 export async function getUserById(id: string): Promise<Omit<User, "password"> | null> {
-  const user = users.get(id);
-  if (!user) {
-    return null;
-  }
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, email, user_name, created_at")
+    .eq("id", Number(id))
+    .maybeSingle();
 
-  const { password: _, ...userWithoutPassword } = user;
-  return userWithoutPassword;
+  if (error || !data) return null;
+
+  return {
+    id: String(data.id),
+    email: data.email,
+    name: data.user_name,
+    createdAt: new Date(data.created_at),
+  };
 }
 
 export async function verifyPassword(
@@ -65,8 +82,16 @@ export async function verifyPassword(
 }
 
 export async function getAllUsers(): Promise<Omit<User, "password">[]> {
-  return Array.from(users.values()).map((user) => {
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
-  });
+  const { data, error } = await supabase
+    .from("users")
+    .select("id, email, user_name, created_at");
+
+  if (error || !data) return [];
+
+  return data.map((row) => ({
+    id: String(row.id),
+    email: row.email,
+    name: row.user_name,
+    createdAt: new Date(row.created_at),
+  }));
 }
